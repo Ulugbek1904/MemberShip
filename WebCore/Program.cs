@@ -1,4 +1,3 @@
-
 namespace WebCore
 {
     public class Program

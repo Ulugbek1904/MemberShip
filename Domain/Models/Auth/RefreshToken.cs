@@ -13,6 +13,6 @@ public class RefreshToken : AuditableModelBase<long>
     public virtual User User { get; set; } = default!;
 
     public string TokenHash { get; set; } = default!;
-    public DateTime ExpiresAt { get; set; }
+    public DateTime ExpiryDate { get; set; }
     public bool IsRevoked { get; set; }
 }

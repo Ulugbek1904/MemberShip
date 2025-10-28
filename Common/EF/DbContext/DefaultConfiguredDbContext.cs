@@ -1,7 +1,9 @@
 ﻿using Common.Common.Models;
+using Common.Models.Base;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Reflection;
 
@@ -109,10 +111,11 @@ public abstract class DefaultConfiguredDbContext : Microsoft.EntityFrameworkCore
         return result2;
     }
 
-    public async Task<T?> GetNextSequenceValue<T>(string name, string? schemaName = null)
-    {
-        return await Database.SqlQueryRaw<T>("select nextval('" + (schemaName ?? "public") + "." + name + "') as \"Value\"", Array.Empty<object>()).FirstOrDefaultAsync();
-    }
+    //public async Task<T?> GetNextSequenceValue<T>(string name, string? schemaName = null)
+    //{
+    //    var result = await Database.SqlQuery<long>($"select nextval('{schema}.{name}') as \"Value\"").ToListAsync();
+    //    return result.FirstOrDefault();
+    //}
 
     public async Task<T> GetNextSequenceValueRequired<T>(string name, string? schemaName = null)
     {
@@ -140,7 +143,13 @@ public abstract class DefaultConfiguredDbContext : Microsoft.EntityFrameworkCore
                                       where x.PropertyType == typeof(MultiLanguageField)
                                       select x)
         {
-            modelBuilder.Entity(item.ReflectedType).Property(item.PropertyType, item.Name).hasColumnType("jsonb");
+            var entityBuilder = modelBuilder.Entity(item.ReflectedType);
+            var propertyMethod = typeof(EntityTypeBuilder<>)
+                .MakeGenericType(item.ReflectedType)
+                .GetMethod("Property", new[] { typeof(string) });
+
+            var propertyBuilder = propertyMethod.Invoke(entityBuilder, new object[] { item.Name });
+            propertyBuilder!.GetType().GetMethod("HasColumnType")?.Invoke(propertyBuilder, new object[] { "jsonb" });
         }
 
         foreach (IMutableEntityType item2 in from x in modelBuilder.Model.GetEntityTypes()

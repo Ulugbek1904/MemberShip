@@ -276,7 +276,6 @@ public class AuthService : IAuthService
             new(CustomClaimNames.UserId, user.Id.ToString()),
             new(CustomClaimNames.UserRoleId, user.UserRoleId?.ToString() ?? ""),
             new(CustomClaimNames.StructureCode, result.StructureId),
-            new(CustomClaimNames.CompanyId, result.CompanyId),
         };
 
         var credentials = new SigningCredentials(

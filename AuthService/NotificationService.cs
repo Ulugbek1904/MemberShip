@@ -1,17 +1,20 @@
 ﻿using AuthService.Contracts.Auth;
+using AuthService.Contracts.Auth.Notify;
 using AuthService.Extensions;
 using AuthService.Interfaces;
 using Common.Common.Helpers;
 using Common.Common.Models;
+using Common.EF.Extensions;
 using Common.Exceptions;
 using Common.ResultWrapper.Library;
+using Domain.Enum.Notify;
 using Domain.Extensions;
 using Domain.Models.Common;
-using Infrastructure.Brokers.Notification.Push;
 using Infrastructure.Brokers.Notification.Push.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.SecurityTokenService;
 using Serilog;
+using System.Text.Json;
 
 namespace AuthService;
 
@@ -184,11 +187,6 @@ public partial class AuthService : IAuthService
     public async Task<Wrapper> GetSourceAsync(long id)
     {
         return (content: await _context.PushNotificationSources.GetByIdOrThrowsNotFoundException(id), 200);
-    }
-    public async Task<Wrapper> GetSourceAsync(EnumPushNotificationSource source)
-    {
-        return (content: await _context.PushNotificationSources
-            .FirstOrDefaultAsync(x => x.Source == source), 200);
     }
     public async Task<long> CreateSourceAsync(PushNotificationSource source)
     {
@@ -477,8 +475,6 @@ public partial class AuthService : IAuthService
         var closes = await query.CountAsync(x => x.IsClosed);
         var submissions = await query.CountAsync(x => x.EventDataJson != null);
 
-
-
         return new PopUpMetricsDto
         {
             SourceId = dto.SourceId,
@@ -579,7 +575,7 @@ public partial class AuthService : IAuthService
             return Enumerable.Empty<ActivePopupDto>();
 
         var shownCounts = await _context.PopUpNotifications
-            .Where(e => e.UserId == userId && e.IsShown && e.ShownAt >= now && !e.IsDepositOffer)
+            .Where(e => e.UserId == userId && e.IsShown && e.ShownAt >= now)
             .GroupBy(e => e.SourceId)
             .Select(g => new { SourceId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => (long)x.SourceId!, x => x.Count);
@@ -656,175 +652,5 @@ public partial class AuthService : IAuthService
         await _context.SaveChangesAsync();
     }
 
-    public async Task<PopUpNotification?> GetWeeklyDepositOfferAsync(long companyId, long userId)
-    {
-        var today = DateTime.UtcNow;
-        var currentWeekStart = today.AddDays(-(int)today.DayOfWeek + (int)DayOfWeek.Monday).Date;
-        var nextWeekStart = currentWeekStart.AddDays(7);
-
-        bool popupExistsThisWeek = await _context.PopUpNotifications
-            .AnyAsync(x =>
-                x.UserId == userId &&
-                x.IsDepositOffer &&
-                x.CreatedAt >= currentWeekStart &&
-                x.CreatedAt < nextWeekStart);
-
-        if (popupExistsThisWeek)
-        {
-            return null;
-        }
-
-        var popup = await GetDepositOffersForCompanyAsync(companyId, userId);
-
-        if (popup != null)
-        {
-            _context.PopUpNotifications.Add((PopUpNotification)popup);
-            await _context.SaveChangesAsync();
-            return (PopUpNotification)popup;
-        }
-
-        return null;
-    }
-
-
-
-    private async Task<object> GetDepositOffersForCompanyAsync(long companyId, long userId)
-    {
-        var depositProducts = await _context.DpProducts
-            .Where(p => !p.IsDeleted && p.State == "A")
-            .Select(p => new
-            {
-                p.Id,
-                p.ProductName,
-                p.MinSum,
-                p.MaxSum,
-                p.PercRate,
-                Percentages = p.Percentages
-                    .Select(per => new
-                    {
-                        per.PercRate,
-                        per.BeginDay,
-                        per.EndDay
-                    })
-                    .ToList()
-            })
-            .ToListAsync();
-
-        var company = await _context.Companies
-            .Where(c => c.Id == companyId && !c.IsDeleted)
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                c.MainAccount
-            })
-            .FirstOrDefaultAsync();
-
-        double minBalance = await FindMinimumBalanceForCompany(companyId, company?.MainAccount!);
-
-        if (minBalance <= 0)
-        {
-            return null;
-        }
-
-        var suitableProducts = depositProducts
-            .Where(p => minBalance >= p.MinSum && minBalance <= p.MaxSum)
-            .ToList();
-
-        if (!suitableProducts.Any())
-        {
-            return null;
-        }
-
-        var offers = suitableProducts.Select(p =>
-        {
-            double maxRate = p.Percentages.Any()
-                ? p.Percentages.Max(x => x.PercRate)
-                : (p.PercRate ?? 0);
-
-            double estimatedIncome = minBalance * maxRate / 100;
-
-            return new
-            {
-                p.ProductName,
-                p.MinSum,
-                p.MaxSum,
-                MaxPercentage = maxRate,
-                EstimatedIncome = Math.Round(estimatedIncome, 2)
-            };
-        }).ToList();
-
-        var bestOffer = offers.OrderByDescending(x => x.MaxPercentage).First();
-
-        return new PopUpNotification
-        {
-            CreatedAt = DateTime.UtcNow,
-            UserId = userId,
-            Type = EnumPopUpNotificationType.Information,
-            IsDepositOffer = true,
-            SourceId = null,
-            Description = $"{bestOffer.ProductName} " +
-                     $"depoziti {bestOffer.MaxPercentage}% stavkada. " +
-                     $"1 yilda taxminan {bestOffer.EstimatedIncome:N0} so‘m daromad keltiradi.",
-            Title = $"Maxsus taklif: {company?.Name} uchun depozit",
-            IsShown = true,
-            ShownAt = DateTime.UtcNow,
-            ThumbUrl = null
-        };
-    }
-
-    private async Task<double> FindMinimumBalanceForCompany(long companyId, string mainAccount)
-    {
-        int periodDays = 14;
-        var fromDate = DateTime.UtcNow.AddDays(-periodDays).ToString("dd.MM.yyyy");
-        var toDate = DateTime.UtcNow.ToString("dd.MM.yyyy");
-
-        string accountNumber = mainAccount;
-
-        if (string.IsNullOrEmpty(accountNumber))
-            accountNumber = await GetActiveAcountNumberByCompanyIdAsync(companyId);
-
-        if (string.IsNullOrEmpty(accountNumber))
-            return 0;
-
-        var request = new ReportBaseRequestWithPagination
-        {
-            Page = 1,
-            Size = 2000,
-            AccountNumber = accountNumber,
-            FromDate = fromDate,
-            ToDate = toDate
-        };
-
-        var turnoverResponse = await _iabsRpcService
-            .TurnoverReceiptAccountByDocument(request);
-
-        if (turnoverResponse?.Data == null || !turnoverResponse.Data.Any())
-            return 0;
-
-        var dailyBalances = turnoverResponse.Data
-            .GroupBy(x => x.OperationDate)
-            .Select(g =>
-            {
-                var first = g.First();
-                double.TryParse(first.DayEndBalance?.ToString(), out double balance);
-                return balance;
-            })
-            .ToList();
-
-        return dailyBalances.Any() ? dailyBalances.Min() : 0;
-    }
-
-    private Task<string> GetActiveAcountNumberByCompanyIdAsync(long companyId)
-    {
-        const string currencyCode = "000";
-
-        var accountNumber = _context.ActiveAccounts
-            .Where(a => a.CompanyId == companyId && a.CurrencyCode == currencyCode && a.AccountCode == "22800")
-            .Select(a => a.AccountNumber)
-            .FirstOrDefault();
-
-        return Task.FromResult(accountNumber ?? string.Empty);
-    }
     #endregion
 }

@@ -6,22 +6,11 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Domain.Models.Auth;
 
-public class User : SoftDeletableAndAuditableModelBase<long>
+public class VendorUser : SoftDeletableAndAuditableModelBase<long>
 {
-    public string Name { get; set; }
-    public string Username { get; set; } = default!;
     [EmailAddress]
     public string Email { get; set; } = default!;
     public string PasswordHash { get; set; } = default!;
-    public string? PhoneNumber { get; set; }
-
-    [ForeignKey(nameof(UserRole))]
-    public long? UserRoleId { get; set; }
-    public UserRole? UserRole { get; set; }
-
-    public long? CompanyId { get; set; }
-
-
     public ICollection<UserDevice> UserDevices { get; set; } = [];
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
     public ICollection<UserToCompany> UserToCompanies { get; set; } = [];

@@ -20,5 +20,5 @@ public class UserToCompany : AuditableModelBase<long>
 
     [ForeignKey(nameof(User))]
     public long UserId { get; set; }
-    public User User { get; set; } = default!;
+    public VendorUser User { get; set; } = default!;
 }

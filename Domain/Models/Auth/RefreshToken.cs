@@ -10,7 +10,7 @@ public class RefreshToken : AuditableModelBase<long>
 {
     [ForeignKey("User")]
     public long UserId { get; set; }
-    public virtual User User { get; set; } = default!;
+    public virtual VendorUser User { get; set; } = default!;
 
     public string TokenHash { get; set; } = default!;
     public DateTime ExpiryDate { get; set; }

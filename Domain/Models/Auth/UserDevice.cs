@@ -9,7 +9,7 @@ public class UserDevice : AuditableModelBase<long>
 {
     [ForeignKey(nameof(User))]
     public long UserId { get; set; }
-    public virtual User User { get; set; } = default!;
+    public virtual VendorUser User { get; set; } = default!;
 
     [ForeignKey(nameof(Company))]
     public long? CompanyId { get; set; }

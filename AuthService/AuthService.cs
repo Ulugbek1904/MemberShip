@@ -41,7 +41,7 @@ public partial class AuthService : IAuthService
     {
         _configuration = configuration;
         _contextAccessor = contextAccessor;
-        this._context = context;
+        _context = context;
         this.fileConfig = fileConfig;
     }
 
@@ -62,7 +62,7 @@ public partial class AuthService : IAuthService
                 Trusted = false
             }, true);
 
-            User user = new()
+            VendorUser user = new()
             {
                 Name = OtherConstants.MOBILE_GUEST,
                 PhoneNumber = dto.PhoneNumber,
@@ -91,251 +91,45 @@ public partial class AuthService : IAuthService
             throw;
         }
     }
-    public async Task<bool> CheckPhoneRegisteredAsync(string phoneNumber)
+    public async Task<bool> CheckEmailRegisteredAsync(string phoneNumber)
     {
         phoneNumber = phoneNumber.GetCorrectPhoneNumber();
 
         return await _context.Users
             .AnyAsync(x => x.PhoneNumber == phoneNumber && !x.IsDeleted);
     }
-
-    #region WEB
-    public async Task RegisterAsync(RegisterDto dto)
-    {
-        var isContactVerified = _contextAccessor.HttpContext!
-            .GetOrThrowExceptionCookie(_contactVerifiedCookieKey) == "true";
-
-        if (!isContactVerified)
-            throw new UnauthorizedException("Please_verify_your_contact_before_registering");
-
-        var normalized = dto.PhoneNumber.GetCorrectPhoneNumber();
-
-        if (await CheckPhoneRegisteredAsync(normalized))
-            throw new BadRequestException("This_phone_number_already_exists");
-
-        var verifyContent = await _styxClientService.VerifyAndGetCmsContentAsync(dto.Cms);
-
-        if (!verifyContent.IsVerified)
-            throw new BadRequestException("Provided_does_not_match_the_verified_data.");
-
-        string innPinfl = verifyContent.Inn;
-
-        var hasDirectorConflict = await _context.UserToCompanies
-            .AnyAsync(x => x.Company.InnPinfl == innPinfl && x.UserType == EnumUserType.Director);
-
-        if (hasDirectorConflict)
-            throw new BadRequestException($"Director_already_exist_that_{innPinfl}");
-
-        var client = await GetBankClientAsync(innPinfl, false);
-        var extra = await GetExtraAsync(new()
-        {
-            ["Filial"] = client!.BranchId,
-            ["ClientType"] = client.Typeof,
-            ["District"] = client.DistrictCode,
-            ["Region"] = client.RegionCode
-        });
-        var cmsUrl = await SaveCmsAsync(dto, innPinfl);
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
-        {
-            var company = await _context.Companies
-                .FirstOrDefaultAsync(x => x.InnPinfl == innPinfl && !x.IsDeleted);
-
-            if (company is null)
-            {
-                company = CreateCompany(dto, client, cmsUrl, isMobile: false, isWeb: true);
-                SetExtraIDs(company, extra);
-                _context.Companies.Add(company);
-            }
-            else
-            {
-                var to = await _context.UserToCompanies
-                    .Where(x => x.CompanyId == company.Id && x.UserType == EnumUserType.EImzo)
-                    .AsTracking()
-                    .SingleOrDefaultAsync();
-
-                if (to is not null)
-                {
-                    await _context.RefreshTokens
-                        .Where(t => t.UserId == to.UserId &&
-                                    t.User.StatusId == (long)EnumStatusUser.SignedByEImzo)
-                        .ExecuteDeleteAsync();
-
-                    await _context.Users
-                        .Where(u => u.Id == to.UserId && u.StatusId == (long)EnumStatusUser.SignedByEImzo)
-                        .ExecuteUpdateAsync(s => s
-                            .SetProperty(u => u.IsDeleted, true)
-                            .SetProperty(u => u.UpdatedAt, DateTime.Now)
-                        );
-                }
-
-                company = UpdateCompany(company, dto, client, cmsUrl, isMobile: false, isWeb: true);
-                SetExtraIDs(company, extra);
-                _context.Companies.Update(company);
-            }
-
-            await _context.SaveChangesAsync();
-
-            User director = new()
-            {
-                Name = client.Director ?? client.Name,
-                PhoneNumber = normalized,
-                PasswordHash = EnvironmentHelper.IsProduction
-                    ? PasswordHelper.Encrypt(dto.Password)
-                    : dto.Password,
-                UserRoleId = null,
-                StatusId = (long)EnumStatusUser.PreRegistration,
-                CompanyId = company.Id,
-                IsDirector = true,
-                CreatedAt = DateTime.Now,
-                UpdatedAt = DateTime.Now
-            };
-            _context.Users.Add(director);
-            await _context.SaveChangesAsync();
-
-            var utc = CreateUserToCompany(director.Id, company.Id, EnumUserType.Director);
-            _context.UserToCompanies.Add(utc);
-
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
-    }
-    public async Task<object> VerifyOtpAfterLoginAsync(VerifyOtpDto dto)
-    {
-        var verificationKey = _contextAccessor.HttpContext!
-            .GetOrThrowExceptionCookie(_otpCookieKey);
-
-        var verificationCode = await _context.VerificationCodes
-            .FirstOrDefaultAsync(x => x.Key == verificationKey && x.Otp == dto.Otp.Hash());
-
-        if (verificationCode is null)
-            throw new UnauthorizedException();
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
-        {
-            verificationCode.HasUsed = true;
-            await _context.SaveChangesAsync();
-
-            dto.PhoneNumber = dto.PhoneNumber.GetCorrectPhoneNumber();
-
-            var selecter = await _context.Users
-                .Where(u => u.PhoneNumber == dto.PhoneNumber && !u.IsDeleted)
-                .Select(u => new
-                {
-                    User = u,
-                    CompanyIds = u.UserToCompanies.Select(c => c.CompanyId).ToList()
-                })
-                .SingleOrDefaultAsync();
-
-            var user = selecter?.User;
-            if (user is null)
-                throw new UnauthorizedException();
-
-            var companyIds = selecter!.CompanyIds;
-
-            switch (companyIds.Count)
-            {
-                case 0:
-                    throw new UnauthorizedException();
-                case > 1:
-                    return await GetWantChooseCompaniesAsync(user.Id);
-            }
-
-            var companyId = companyIds[0];
-
-            if (dto.Trusted)
-                await this.CreateUserDevice(user.Id, companyId, "");
-
-            await this.MarkClientPlatformAsync(companyId, false);
-
-            await this.SaveRefreshTokenAsync(user.Id, companyId);
-            await transaction.CommitAsync();
-
-            return await this.GenerateTokenAsync(user.Id, companyId);
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
-    }
-    #endregion
-
-    #region WEB and MOBILE
     public async Task<object> SignAsync(SignDto dto)
     {
-        var selecter = await _context.Users
+        var selector = await _context.Users
             .Where(x => x.Email == dto.Email && !x.IsDeleted)
-            .Select(u => new
+            .Select(x => new
             {
-                User = u,
-                CompanyIds = u.UserToCompanies.Select(c => c.CompanyId).ToList()
+                User = x,
             })
             .SingleOrDefaultAsync();
 
-        var user = selecter?.User;
+        var user = selector?.User;
         if (user is null)
             throw new NotFoundException("User_not_found_or_deleted");
 
         if (!user.IsValidPassword(dto.Password))
             throw new BadRequestException("Password_is_incorrect!");
 
-        if (dto.IsMobile)
-        {
-            return await SendSmsAsync(new()
-            {
-                PhoneNumber = dto.PhoneNumber,
-                TemplateId = SmsMessages.LOGIN_CODE_TEMPLATE_ID,
-                Hash = dto.Hash
-            });
-        }
-
-        var companyIds = selecter!.CompanyIds;
-        if (companyIds.Count == 0)
-            throw new UnauthorizedException();
+        var companyIds = selector!.CompanyIds;
 
         var userId = user.Id;
 
         var deviceId = GetOrCreateDeviceToken();
-        var isDeviceTrusted = await IsDeviceTrustedAsync(user.Id, deviceId);
 
-        if (isDeviceTrusted)
-        {
-            if (companyIds.Count > 1)
-                return await GetWantChooseCompaniesAsync(userId);
 
-            await SaveRefreshTokenAsync(userId, companyIds[0]);
-            return await GenerateTokenAsync(userId, companyIds[0]);
-        }
-
-        var directorPhoneNumber = await (
-                                      from utc in _context.UserToCompanies
-                                      join director in _context.UserToCompanies
-                                          on utc.CompanyId equals director.CompanyId
-                                      where utc.UserId == userId && director.UserType == EnumUserType.Director
-                                      select director.User.PhoneNumber
-                                  ).FirstOrDefaultAsync()
-                                  ?? throw new UnauthorizedException();
-
-        return await SendSmsAsync(new()
-        {
-            PhoneNumber = directorPhoneNumber,
-            TemplateId = SmsMessages.LOGIN_CODE_TEMPLATE_ID
-        });
+        await SaveRefreshTokenAsync(userId, companyIds[0]);
+        return await GenerateTokenAsync(userId, companyIds[0]);
     }
     public async Task<object> GetMeAsync(long userId, string? companyId)
     {
         var user = await _context.Users
                        .Where(x => x.Id == userId && !x.IsDeleted)
                        .Include(x => x.UserRole)
-                       .Include(x => x.Person)
                        .Include(x => x.Status)
                        .AsNoTracking()
                        .FirstOrDefaultAsync()
@@ -447,32 +241,6 @@ public partial class AuthService : IAuthService
                     }
             }
         };
-    }
-    public async Task<TokenResult> GenerateTokenChoosenCompanyAsync(ChoosenCompanyDto dto)
-    {
-        var userIdCookie = _contextAccessor.HttpContext!.Request.Cookies["choosen-user-id"];
-
-        if (string.IsNullOrWhiteSpace(userIdCookie))
-            throw new BadRequestException("invalid_or_expired_user_id");
-
-        var userId = long.Parse(userIdCookie);
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-
-        var ent = await _context.UserToCompanies
-                      .Where(x => x.UserId == userId && x.CompanyId == dto.CompanyId)
-                      .AsNoTracking()
-                      .SingleOrDefaultAsync()
-                  ?? throw new NotFoundException("User-to-Company_not_found");
-
-        await SaveRefreshTokenAsync(ent.UserId, dto.CompanyId, true);
-
-        if (dto.Trusted)
-            await this.CreateUserDevice(userId, dto.CompanyId, "");
-
-        await transaction.CommitAsync();
-
-        return await GenerateTokenAsync(ent.UserId, ent.CompanyId);
     }
     public async Task ResetPasswordAsync(ResetPasswordDto dto)
     {
@@ -647,7 +415,7 @@ public partial class AuthService : IAuthService
     #endregion
 
     #region HELPER METHODS
-    private async Task<User> GetUser(long userId)
+    private async Task<VendorUser> GetUser(long userId)
     {
         throw new NotImplementedException();
     }

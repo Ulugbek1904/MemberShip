@@ -1,5 +1,4 @@
 ﻿using Common.EF.DbContext;
-using Domain.Models.Auth;
 using Domain.Models.Common;
 using Microsoft.EntityFrameworkCore;
 

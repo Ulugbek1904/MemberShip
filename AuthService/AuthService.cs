@@ -1,17 +1,22 @@
 ﻿using AuthService.Contracts.Auth;
+using AuthService.Contracts.Auth.Both;
 using AuthService.Extensions;
 using AuthService.Interfaces;
 using Common.Common.Helpers;
 using Common.EF.Attributes;
+using Common.Exceptions;
 using Common.Exceptions.Common;
 using Domain.Constants;
+using Domain.Enum.Auth;
 using Domain.Extensions;
 using Domain.Models.Auth;
+using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.SecurityTokenService;
 using Microsoft.IdentityModel.Tokens;
+using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -20,17 +25,20 @@ using System.Text;
 namespace AuthService;
 
 [Injectable]
-public class AuthService : IAuthService
+public partial class AuthService : IAuthService
 {
     private readonly IConfiguration _configuration;
     private readonly IHttpContextAccessor _contextAccessor;
+    private readonly AppDbContext _context;
 
     public AuthService(
         IConfiguration configuration,
-        IHttpContextAccessor contextAccessor)
+        IHttpContextAccessor contextAccessor,
+        AppDbContext context)
     {
         _configuration = configuration;
         _contextAccessor = contextAccessor;
+        this._context = context;
     }
     public async Task<TokenResult> RegisterAsync(MobileRegisterDto dto)
     {
@@ -255,6 +263,288 @@ public class AuthService : IAuthService
     }
     #endregion
 
+    #region WEB and MOBILE
+    public async Task<object> SignAsync(SignDto dto)
+    {
+        var selecter = await _context.Users
+            .Where(x => x.Email == dto.Email && !x.IsDeleted)
+            .Select(u => new
+            {
+                User = u,
+                CompanyIds = u.UserToCompanies.Select(c => c.CompanyId).ToList()
+            })
+            .SingleOrDefaultAsync();
+
+        var user = selecter?.User;
+        if (user is null)
+            throw new NotFoundException("User_not_found_or_deleted");
+
+        if (!user.IsValidPassword(dto.Password))
+            throw new BadRequestException("Password_is_incorrect!");
+
+        if (dto.IsMobile)
+        {
+            return await SendSmsAsync(new()
+            {
+                PhoneNumber = dto.PhoneNumber,
+                TemplateId = SmsMessages.LOGIN_CODE_TEMPLATE_ID,
+                Hash = dto.Hash
+            });
+        }
+
+        var companyIds = selecter!.CompanyIds;
+        if (companyIds.Count == 0)
+            throw new UnauthorizedException();
+
+        var userId = user.Id;
+
+        var deviceId = GetOrCreateDeviceToken();
+        var isDeviceTrusted = await IsDeviceTrustedAsync(user.Id, deviceId);
+
+        if (isDeviceTrusted)
+        {
+            if (companyIds.Count > 1)
+                return await GetWantChooseCompaniesAsync(userId);
+
+            await SaveRefreshTokenAsync(userId, companyIds[0]);
+            return await GenerateTokenAsync(userId, companyIds[0]);
+        }
+
+        var directorPhoneNumber = await (
+                                      from utc in _context.UserToCompanies
+                                      join director in _context.UserToCompanies
+                                          on utc.CompanyId equals director.CompanyId
+                                      where utc.UserId == userId && director.UserType == EnumUserType.Director
+                                      select director.User.PhoneNumber
+                                  ).FirstOrDefaultAsync()
+                                  ?? throw new UnauthorizedException();
+
+        return await SendSmsAsync(new()
+        {
+            PhoneNumber = directorPhoneNumber,
+            TemplateId = SmsMessages.LOGIN_CODE_TEMPLATE_ID
+        });
+    }
+    public async Task<object> GetMeAsync(long userId, string? companyId)
+    {
+        var user = await _context.Users
+                       .Where(x => x.Id == userId && !x.IsDeleted)
+                       .Include(x => x.UserRole)
+                       .Include(x => x.Person)
+                       .Include(x => x.Status)
+                       .AsNoTracking()
+                       .FirstOrDefaultAsync()
+                   ?? throw new NotFoundException("User not found");
+
+        object? companyDto = null;
+        bool isDirector = false;
+
+        UserToCompany utc;
+        if (string.IsNullOrWhiteSpace(companyId))
+        {
+            utc = await _context.UserToCompanies
+                .Where(x => x.UserId == userId && x.UserType == EnumUserType.Director)
+                .AsTracking()
+                .FirstOrDefaultAsync();
+        }
+        else
+        {
+            utc = await _context.UserToCompanies
+                .Where(x => x.UserId == userId && x.CompanyId == long.Parse(companyId))
+                .AsTracking()
+                .SingleOrDefaultAsync();
+        }
+
+        if (utc is not null)
+        {
+            var company = await _context.Companies
+                .Where(x => x.Id == utc.CompanyId)
+                .Include(x => x.TypeClient)
+                .Include(x => x.Structure)
+                .Include(x => x.BankFilial)
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+
+            if (company != null)
+            {
+                companyDto = new
+                {
+                    company.Id,
+                    company.Address,
+                    company.Name,
+                    company.BankClientId,
+                    Inn = company.InnPinfl,
+                    company.ClientCode,
+                    company.CodeFilial,
+                    company.DateOpen,
+                    company.ClientsId,
+                    company.BranchId,
+                    company.LocalCode,
+                    company.Subject,
+                    company.RegistrationNumber,
+                    company.Director,
+                    company.DirectorPassport,
+                    company.MainAccount,
+                    company.MobilePhone,
+                    company.DistrictCode,
+                    company.Oked,
+                    DisposableToken = CreateDisposableToken(company.Id),
+                    BankFilial = company.BankFilialId != null
+                        ? new
+                        {
+                            Id = company.BankFilialId,
+                            company.BankFilial?.NameBXOBXKM,
+                            company.BankFilial?.BankName,
+                            company.BankFilial?.CbCode
+                        }
+                        : null,
+                    TypeClient = company.TypeClientId.HasValue
+                        ? new
+                        {
+                            company.TypeClient?.Id,
+                            company.TypeClient?.Code,
+                            company.TypeClient?.Name,
+                        }
+                        : null,
+                    Structure = company.StructureId != null
+                        ? new
+                        {
+                            company.StructureId,
+                            company.Structure!.Name
+                        }
+                        : null
+                };
+
+                isDirector = utc is { UserType: EnumUserType.Director };
+            }
+        }
+
+        return new
+        {
+            Company = companyDto,
+            User = new
+            {
+                user.Id,
+                user.Name,
+                user.StatusId,
+                Status = user.Status?.Name,
+                user.UserRoleId,
+                RoleName = user.UserRole?.Name,
+                user.PhoneNumber,
+                IsDirector = isDirector,
+                Person = user.PersonId == null
+                    ? null
+                    : new
+                    {
+                        Id = user.PersonId,
+                        user.Person?.FullName,
+                        user.Person?.Pinfl
+                    }
+            }
+        };
+    }
+    public async Task<TokenResult> GenerateTokenChoosenCompanyAsync(ChoosenCompanyDto dto)
+    {
+        var userIdCookie = _contextAccessor.HttpContext!.Request.Cookies["choosen-user-id"];
+
+        if (string.IsNullOrWhiteSpace(userIdCookie))
+            throw new BadRequestException("invalid_or_expired_user_id");
+
+        var userId = long.Parse(userIdCookie);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        var ent = await _context.UserToCompanies
+                      .Where(x => x.UserId == userId && x.CompanyId == dto.CompanyId)
+                      .AsNoTracking()
+                      .SingleOrDefaultAsync()
+                  ?? throw new NotFoundException("User-to-Company_not_found");
+
+        await SaveRefreshTokenAsync(ent.UserId, dto.CompanyId, true);
+
+        if (dto.Trusted)
+            await this.CreateUserDevice(userId, dto.CompanyId, "");
+
+        await transaction.CommitAsync();
+
+        return await GenerateTokenAsync(ent.UserId, ent.CompanyId);
+    }
+    public async Task ResetPasswordAsync(ResetPasswordDto dto)
+    {
+        string phone = dto.PhoneNumber.GetCorrectPhoneNumber();
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        try
+        {
+            var verificationKey = _contextAccessor.HttpContext!
+                .GetOrThrowExceptionCookie(_otpCookieKey);
+
+            var otp = EnvironmentHelper.IsProduction ? dto.Otp.Hash() : dto.Otp;
+
+            var verificationCode = await _context.VerificationCodes
+                .FirstOrDefaultAsync(x => x.Key == verificationKey && x.Otp == otp);
+
+            if (verificationCode is null)
+                throw new BadRequestException("Verification_code_is_incorrect");
+
+            verificationCode.HasUsed = true;
+            await _context.SaveChangesAsync();
+
+            var user = await _context.Users
+                .Where(x => x.PhoneNumber == phone && !x.IsDeleted)
+                .SingleOrDefaultAsync();
+
+            if (user is null)
+            {
+                throw new NotFoundException("User_not_foud");
+            }
+
+            user.PasswordHash = EnvironmentHelper.IsProduction
+                ? PasswordHelper.Encrypt(dto.Password)
+                : dto.Password;
+
+            _context.Users.Update(user);
+            await _context.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+    public async Task LogoutAsync(long userId)
+    {
+        await _context.RefreshTokens
+            .Where(x => !x.IsRevoked && x.UserId == userId)
+            .ExecuteUpdateAsync(x =>
+                x.SetProperty(v => v.IsRevoked, true));
+
+        _contextAccessor.HttpContext!.Response.Cookies.Delete("refresh-token");
+    }
+    public async Task<TokenResult> RefreshTokenAsync()
+    {
+        var refreshToken = _contextAccessor.HttpContext!
+            .GetCookie("refresh-token");
+
+        if (string.IsNullOrEmpty(refreshToken))
+        {
+            throw new UnauthorizedException();
+        }
+
+        var storedToken = await GetRefreshTokenAsync(refreshToken);
+
+        if (storedToken is null || storedToken.ExpiryDate < DateTime.Now)
+        {
+            throw new UnauthorizedException();
+        }
+
+        return await GenerateTokenAsync(storedToken.UserId, storedToken.CompanyId);
+    }
+    #endregion
+
     #region ACCESS TOKEN 
     private async Task<TokenResult> GenerateAccessToken(long userid)
     {
@@ -298,6 +588,7 @@ public class AuthService : IAuthService
         };
     }
     #endregion
+
     #region REFRESH TOKEN
 
     private static string GenerateRefreshToken()
@@ -349,6 +640,7 @@ public class AuthService : IAuthService
             .SingleOrDefaultAsync(rt => rt.TokenHash == tokenHash && !rt.IsRevoked);
     }
     #endregion
+
     #region HELPER METHODS
     private async Task<User> GetUser(long userId)
     {

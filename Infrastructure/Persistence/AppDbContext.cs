@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Persistence;
 
-internal class AppDbContext : DefaultConfiguredDbContext
+public class AppDbContext : DefaultConfiguredDbContext
 {
     public AppDbContext()
     {
@@ -13,7 +13,9 @@ internal class AppDbContext : DefaultConfiguredDbContext
         : base(options)
     {
     }
-
+    #region Auth
+    public DbSet<User> Users { get; set; }
+    #endregion
     #region Common
     public virtual DbSet<PushNotification> PushNotifications { get; set; }
     #endregion

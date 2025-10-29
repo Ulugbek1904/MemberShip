@@ -1,5 +1,6 @@
 ﻿using Common.ResultWrapper.Library.Common;
 using Common.ResultWrapper.Library.Interfaces;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using System.Net;
 using System.Text.Json.Serialization;
 
@@ -26,7 +27,7 @@ public class WrapperGeneric<T> : IWrapperGeneric<T>
     public object? Query { get; set; }
 
     [JsonPropertyName("modelStateError")]
-    public List<ModelError>? ModelStateError { get; init; }
+    public List<Common.ModelError>? ModelStateError { get; init; }
 
     [JsonIgnore]
     public string? StackTrace { get; init; }

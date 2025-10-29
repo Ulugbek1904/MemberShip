@@ -14,6 +14,7 @@ using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.SecurityTokenService;
 using Microsoft.IdentityModel.Tokens;
 using System;
@@ -30,16 +31,20 @@ public partial class AuthService : IAuthService
     private readonly IConfiguration _configuration;
     private readonly IHttpContextAccessor _contextAccessor;
     private readonly AppDbContext _context;
+    private readonly FileConfig fileConfig;
 
     public AuthService(
         IConfiguration configuration,
         IHttpContextAccessor contextAccessor,
-        AppDbContext context)
+        AppDbContext context,
+        IOptions<FileConfig> fileConfig)
     {
         _configuration = configuration;
         _contextAccessor = contextAccessor;
         this._context = context;
+        this.fileConfig = fileConfig;
     }
+
     public async Task<TokenResult> RegisterAsync(MobileRegisterDto dto)
     {
         dto.PhoneNumber = dto.PhoneNumber.GetCorrectPhoneNumber();

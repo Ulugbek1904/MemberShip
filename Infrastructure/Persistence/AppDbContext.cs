@@ -1,4 +1,5 @@
 ﻿using Common.EF.DbContext;
+using Domain.Models.Auth;
 using Domain.Models.Common;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,9 +16,14 @@ public class AppDbContext : DefaultConfiguredDbContext
     }
     #region Auth
     public DbSet<User> Users { get; set; }
+    public DbSet<UserToCompany> UserToCompanies { get; set; }
     #endregion
+
     #region Common
-    public virtual DbSet<PushNotification> PushNotifications { get; set; }
+    public DbSet<PushNotification> PushNotifications { get; set; }
+    public DbSet<PushNotificationSource> PushNotificationSources { get; set; }
+    public DbSet<PopUpNotificationSource> PopUpNotificationSources { get; set; }
+    public DbSet<PopUpNotification> PopUpNotifications { get; set; }
     #endregion
 
 

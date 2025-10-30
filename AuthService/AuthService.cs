@@ -10,6 +10,7 @@ using Domain.Constants;
 using Domain.Enum.Auth;
 using Domain.Extensions;
 using Domain.Models.Auth;
+using Infrastructure.Brokers.FileService;
 using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -42,15 +43,13 @@ public partial class AuthService : IAuthService
         _configuration = configuration;
         _contextAccessor = contextAccessor;
         _context = context;
-        this.fileConfig = fileConfig;
+        this.fileConfig = fileConfig.Value;
     }
 
     public async Task<TokenResult> RegisterAsync(MobileRegisterDto dto)
     {
-        dto.PhoneNumber = dto.PhoneNumber.GetCorrectPhoneNumber();
-
-        if (await _context.Users.AnyAsync(x => x.PhoneNumber == dto.PhoneNumber && !x.IsDeleted))
-            throw new AlreadyExistsException("Phone_number_already_exists");
+        if (await _context.Users.AnyAsync(x => x.Email == dto.Email && !x.IsDeleted))
+            throw new AlreadyExistsException("Email_already_exists");
 
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
@@ -91,7 +90,7 @@ public partial class AuthService : IAuthService
             throw;
         }
     }
-    public async Task<bool> CheckEmailRegisteredAsync(string phoneNumber)
+    public async Task<bool> CheckEmailRegisteredAsync(string email)
     {
         phoneNumber = phoneNumber.GetCorrectPhoneNumber();
 
@@ -316,7 +315,6 @@ public partial class AuthService : IAuthService
 
         return await GenerateTokenAsync(storedToken.UserId, storedToken.CompanyId);
     }
-    #endregion
 
     #region ACCESS TOKEN 
     private async Task<TokenResult> GenerateAccessToken(long userid)

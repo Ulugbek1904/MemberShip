@@ -15,15 +15,15 @@ public class AppDbContext : DefaultConfiguredDbContext
     {
     }
     #region Auth
-    public DbSet<User> Users { get; set; }
+    public DbSet<VendorUser> VendorUsers { get; set; }
     public DbSet<UserToCompany> UserToCompanies { get; set; }
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<VerificationCode> VerificationCodes { get; set; }
     #endregion
 
     #region Common
     public DbSet<PushNotification> PushNotifications { get; set; }
     public DbSet<PushNotificationSource> PushNotificationSources { get; set; }
-    public DbSet<PopUpNotificationSource> PopUpNotificationSources { get; set; }
-    public DbSet<PopUpNotification> PopUpNotifications { get; set; }
     #endregion
 
 

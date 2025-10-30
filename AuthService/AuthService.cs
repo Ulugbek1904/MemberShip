@@ -10,6 +10,7 @@ using Domain.Constants;
 using Domain.Enum.Auth;
 using Domain.Extensions;
 using Domain.Models.Auth;
+using Domain.Models.Org;
 using Infrastructure.Brokers.FileService;
 using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
@@ -33,6 +34,7 @@ public partial class AuthService : IAuthService
     private readonly IHttpContextAccessor _contextAccessor;
     private readonly AppDbContext _context;
     private readonly FileConfig fileConfig;
+    private const int _otpExpirationInMinutes = 5;
 
     public AuthService(
         IConfiguration configuration,
@@ -48,41 +50,41 @@ public partial class AuthService : IAuthService
 
     public async Task<TokenResult> RegisterAsync(MobileRegisterDto dto)
     {
-        if (await _context.Users.AnyAsync(x => x.Email == dto.Email && !x.IsDeleted))
+        if (await _context.VendorUsers.AnyAsync(x => x.Email == dto.Email && !x.IsDeleted))
             throw new AlreadyExistsException("Email_already_exists");
+
 
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            await this.VerifyOtpCodeAsync(new()
-            {
-                Otp = dto.Otp,
-                PhoneNumber = dto.PhoneNumber,
-                Trusted = false
-            }, true);
+
 
             VendorUser user = new()
             {
-                Name = OtherConstants.MOBILE_GUEST,
-                PhoneNumber = dto.PhoneNumber,
                 PasswordHash = EnvironmentHelper.IsProduction
                     ? PasswordHelper.Encrypt(dto.Password)
                     : dto.Password,
-                StatusId = (long)EnumStatusUser.ConfirmedWithOtp,
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now
             };
 
-            _context.Users.Add(user);
+            _context.VendorUsers.Add(user);
+
+            Company newCompany = new()
+            {
+                Name = "Company Name",
+                IsLastSeen = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
 
             await _context.SaveChangesAsync();
 
-            await this.CreateUserDevice(user.Id, null, dto.PhoneBrand);
             await this.SaveRefreshTokenAsync(user.Id, null, true);
 
             await transaction.CommitAsync();
 
-            return await this.GenerateTokenAsync(user.Id);
+            return await this.GenerateAccessToken(user.Id);
         }
         catch
         {
@@ -92,18 +94,17 @@ public partial class AuthService : IAuthService
     }
     public async Task<bool> CheckEmailRegisteredAsync(string email)
     {
-        phoneNumber = phoneNumber.GetCorrectPhoneNumber();
-
-        return await _context.Users
-            .AnyAsync(x => x.PhoneNumber == phoneNumber && !x.IsDeleted);
+        return await _context.VendorUsers
+            .AnyAsync(x => x.Email == email && !x.IsDeleted);
     }
     public async Task<object> SignAsync(SignDto dto)
     {
-        var selector = await _context.Users
+        var selector = await _context.VendorUsers
             .Where(x => x.Email == dto.Email && !x.IsDeleted)
             .Select(x => new
             {
                 User = x,
+                CompanyIds = x.UserToCompanies.Select(c => c.Id).ToList(),
             })
             .SingleOrDefaultAsync();
 
@@ -117,9 +118,6 @@ public partial class AuthService : IAuthService
         var companyIds = selector!.CompanyIds;
 
         var userId = user.Id;
-
-        var deviceId = GetOrCreateDeviceToken();
-
 
         await SaveRefreshTokenAsync(userId, companyIds[0]);
         return await GenerateTokenAsync(userId, companyIds[0]);
@@ -373,13 +371,13 @@ public partial class AuthService : IAuthService
 
         return Convert.ToBase64String(randomBytes);
     }
-    private async Task SaveRefreshTokenAsync(long userId, bool isMobile = false)
+    private async Task SaveRefreshTokenAsync(long userId, long? companyId, bool isMobile = false)
     {
         await _context.RefreshTokens
-            .Where(x => !x.IsRevoked && x.UserId == userId)
+            .Where(x => !x.IsRevoked && x.UserId == userId && (!companyId.HasValue || x.CompanyId == companyId))
             .ExecuteUpdateAsync(x =>
                 x.SetProperty(v => v.IsRevoked, true));
-
+         
         var refreshToken = GenerateRefreshToken();
         var tokenHash = PasswordHelper.Encrypt(refreshToken);
 
@@ -397,11 +395,6 @@ public partial class AuthService : IAuthService
 
         _context.RefreshTokens.Add(newToken);
         await _context.SaveChangesAsync();
-
-        _contextAccessor.HttpContext!.SetCookie(
-            "refresh-token",
-            refreshToken,
-            newToken.ExpiryDate);
     }
     private async Task<RefreshToken?> GetRefreshTokenAsync(string refreshToken)
     {

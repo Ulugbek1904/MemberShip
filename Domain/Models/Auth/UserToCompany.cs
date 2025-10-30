@@ -7,13 +7,10 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace Domain.Models.Auth;
 
 [Table("user_to_company", Schema = "auth")]
-[Index(nameof(UserType))]
 [Index(nameof(CompanyId))]
 [Index(nameof(UserId))]
 public class UserToCompany : AuditableModelBase<long>
 {
-    public EnumUserType UserType { get; set; }
-
     [ForeignKey(nameof(Company))]
     public long CompanyId { get; set; }
     public Company Company { get; set; } = default!;

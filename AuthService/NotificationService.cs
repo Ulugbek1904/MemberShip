@@ -7,38 +7,33 @@ using Common.Common.Models;
 using Common.EF.Extensions;
 using Common.Exceptions;
 using Common.ResultWrapper.Library;
-using Domain.Enum.Notify;
 using Domain.Extensions;
+using Domain.Models.Auth;
 using Domain.Models.Common;
 using Infrastructure.Brokers.Notification.Push.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.SecurityTokenService;
 using Serilog;
-using System.Text.Json;
 
 namespace AuthService;
 
 public partial class AuthService : IAuthService
 {
-    #region SMS
-
-    private static readonly string[] FIXED_MOBILE_PHONE_NUMBERS =
+    #region EMAIL
+    private static readonly string[] FIXED_EMAILS=
     {
-        "998900324412",
-        "998977391191",
-        "998900021121"
+        "julugbek023@gmail.com"
     };
     private const string DEFAULT_OTP_CODE = "111111";
-
-    public async Task<TokenResult> SendSmsAsync(SendSmsDto dto)
+    public async Task<TokenResult> SendEmailAsync(SendEmailDto dto)
     {
-        string normalizedPhone = dto.PhoneNumber.GetCorrectPhoneNumber();
+
         var now = DateTime.UtcNow;
 
         // Find existing valid OTPs
         var existingOtps = await _context.VerificationCodes
-            .Where(x => x.PhoneNumber == normalizedPhone && !x.HasUsed && x.ExpiredDate > now)
-            .OrderByDescending(x => x.ExpiredDate)
+            .Where(x => x.Email == dto.Email && !x.HasUsed && x.ExipireDate > now)
+            .OrderByDescending(x => x.ExipireDate)
             .ToListAsync();
 
         if (existingOtps.Count != 0)
@@ -46,26 +41,19 @@ public partial class AuthService : IAuthService
             await ReuseValidOtpIfExistsAsync(existingOtps);
             return new TokenResult { SmsRequired = true };
         }
+        bool isTestEmail = FIXED_EMAILS.Contains(dto.Email);
+        string otpCode = isTestEmail? DEFAULT_OTP_CODE : GenerateOtpCode();
 
-        bool isTestNumber = FIXED_MOBILE_PHONE_NUMBERS.Contains(normalizedPhone);
-        string otpCode = isTestNumber ? DEFAULT_OTP_CODE : GenerateOtpCode();
-
-        var verificationCode = await CreateOtpCodeAsync(normalizedPhone, otpCode);
-        SetOtpCookie(verificationCode.Key, verificationCode.ExpiredDate);
+        var verificationCode = await CreateOtpCodeAsync(dto.Email, otpCode);
 
         if (!string.IsNullOrWhiteSpace(dto.Hash))
             otpCode += $"\n{dto.Hash}";
 
-        if (EnvironmentHelper.IsProduction && !isTestNumber)
+        if (EnvironmentHelper.IsProduction && !isTestEmail)
         {
             try
             {
-                await _iabsRpcService.SingleSendSmsAsync(new()
-                {
-                    PhoneNumber = normalizedPhone,
-                    TemplateId = dto.TemplateId,
-                    Variables = new() { { SmsMessages.OTP, otpCode } }
-                });
+                
             }
             catch (Exception ex)
             {
@@ -121,20 +109,20 @@ public partial class AuthService : IAuthService
 
         SetOtpCookie(latestOtp.Key, latestOtp.ExpiredDate);
     }
-    private async Task<VerificationCode> CreateOtpCodeAsync(string phoneNumber, string otpCode)
+    private async Task<VerificationCode> CreateOtpCodeAsync(string email, string otpCode)
     {
         VerificationCode? verificationCode;
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            await MarkVerificationCodesAsUsedAsync(phoneNumber);
+            await MarkVerificationCodesAsUsedAsync(email);
 
             verificationCode = new()
             {
-                PhoneNumber = phoneNumber,
+                Email = email,
                 HasUsed = false,
                 Otp = otpCode.Hash(),
-                ExpiredDate = DateTime.UtcNow.AddMinutes(_otpExpirationInMinutes),
+                ExipireDate = DateTime.UtcNow.AddMinutes(_otpExpirationInMinutes),
                 Key = Guid.NewGuid().ToString()
             };
 
@@ -145,24 +133,17 @@ public partial class AuthService : IAuthService
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "SendSmsAsync failed for {PhoneNumber}", phoneNumber);
+            Log.Error(ex, "SendEmailAsync failed for {Email}", email);
             await transaction.RollbackAsync();
             throw;
         }
 
         return verificationCode;
     }
-    private void SetOtpCookie(string key, DateTime expiration)
-    {
-        _contextAccessor.HttpContext!.SetCookie(
-            _otpCookieKey,
-            key,
-            expiration);
-    }
-    private async Task MarkVerificationCodesAsUsedAsync(string phoneNumber)
+    private async Task MarkVerificationCodesAsUsedAsync(string email)
     {
         await _context.VerificationCodes
-            .Where(vc => vc.PhoneNumber == phoneNumber && !vc.HasUsed)
+            .Where(vc => vc.Email == email && !vc.HasUsed)
             .ExecuteUpdateAsync(vc =>
                 vc.SetProperty(v => v.HasUsed, true));
     }

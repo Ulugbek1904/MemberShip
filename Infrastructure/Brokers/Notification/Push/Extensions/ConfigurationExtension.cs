@@ -3,7 +3,6 @@ using Infrastructure.Brokers.Notification.Push.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using System.Text.Json;
-using Microsoft.AspNetCore.Builder;
 
 namespace Infrastructure.Brokers.Notification.Push.Extensions;
 

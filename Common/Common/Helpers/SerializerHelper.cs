@@ -14,18 +14,18 @@ public class SerializerHelper
         return JsonSerializer.Serialize(data, options);
     }
 
-    public static T? FromJsonString<T>(string? content)
-    {
-        return FromJsonString<T>(content, JsonSerializerOptions.Default);
-    }
+    //public static T? FromJsonString<T>(string? content)
+    //{
+    //    return FromJsonString<T>(content, JsonSerializerOptions.Default);
+    //}
 
-    public static T? FromJsonString<T>(string? content, JsonSerializerOptions options)
-    {
-        if (!content.IsNullOrEmpty())
-        {
-            return JsonSerializer.Deserialize<T>(content);
-        }
+    //public static T? FromJsonString<T>(string? content, JsonSerializerOptions options)
+    //{
+    //    if (!content.IsNullOrEmpty())
+    //    {
+    //        return JsonSerializer.Deserialize<T>(content);
+    //    }
 
-        return default(T);
-    }
+    //    return default(T);
+    //}
 }

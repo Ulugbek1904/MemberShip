@@ -1,6 +1,5 @@
 ﻿using Common.Common.Models;
 using Common.Models.Base;
-using System.Security;
 
 namespace Domain.Models.Auth;
 

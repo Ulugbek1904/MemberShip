@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Microsoft.EntityFrameworkCore.Storage;
 using System.Reflection;
 
 namespace Common.EF.DbContext;
@@ -48,68 +47,68 @@ public abstract class DefaultConfiguredDbContext : Microsoft.EntityFrameworkCore
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default(CancellationToken))
-    {
-        TrackActionsAtV2();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-    }
+    //public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default(CancellationToken))
+    //{
+    //    TrackActionsAtV2();
+    //    return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    //}
 
-    public async Task Transactional(Func<Task> action)
-    {
-        await Transactional(action, (IDbContextTransaction transaction) => transaction.CommitAsync(), (IDbContextTransaction transaction, Exception e) => transaction.RollbackAsync());
-    }
+    //public async Task Transactional(Func<Task> action)
+    //{
+    //    await Transactional(action, (IDbContextTransaction transaction) => transaction.CommitAsync(), (IDbContextTransaction transaction, Exception e) => transaction.RollbackAsync());
+    //}
 
-    public async Task<T> Transactional<T>(Func<Task<T>> action)
-    {
-        return await Transactional(action, (IDbContextTransaction transaction) => transaction.CommitAsync(), (IDbContextTransaction transaction, Exception e) => transaction.RollbackAsync());
-    }
+    //public async Task<T> Transactional<T>(Func<Task<T>> action)
+    //{
+    //    return await Transactional(action, (IDbContextTransaction transaction) => transaction.CommitAsync(), (IDbContextTransaction transaction, Exception e) => transaction.RollbackAsync());
+    //}
 
-    public async Task Transactional(Func<Task> action, Func<IDbContextTransaction, Task> onCommit, Func<IDbContextTransaction, Exception, Task> onRollback)
-    {
-        if (Database.CurrentTransaction != null)
-        {
-            await action();
-            return;
-        }
+    //public async Task Transactional(Func<Task> action, Func<IDbContextTransaction, Task> onCommit, Func<IDbContextTransaction, Exception, Task> onRollback)
+    //{
+    //    if (Database.CurrentTransaction != null)
+    //    {
+    //        await action();
+    //        return;
+    //    }
 
-        await using IDbContextTransaction transaction = await Database.BeginTransactionAsync();
-        try
-        {
-            await action();
-            await onCommit(transaction);
-        }
-        catch (Exception arg)
-        {
-            await onRollback(transaction, arg);
-            throw;
-        }
-    }
+    //    await using IDbContextTransaction transaction = await Database.BeginTransactionAsync();
+    //    try
+    //    {
+    //        await action();
+    //        await onCommit(transaction);
+    //    }
+    //    catch (Exception arg)
+    //    {
+    //        await onRollback(transaction, arg);
+    //        throw;
+    //    }
+    //}
 
-    public async Task<T> Transactional<T>(Func<Task<T>> action, Func<IDbContextTransaction, Task> onCommit, Func<IDbContextTransaction, Exception, Task> onRollback)
-    {
-        if (Database.CurrentTransaction != null)
-        {
-            return await action();
-        }
+    //public async Task<T> Transactional<T>(Func<Task<T>> action, Func<IDbContextTransaction, Task> onCommit, Func<IDbContextTransaction, Exception, Task> onRollback)
+    //{
+    //    if (Database.CurrentTransaction != null)
+    //    {
+    //        return await action();
+    //    }
 
-        T result2;
-        await using (IDbContextTransaction transaction = await Database.BeginTransactionAsync())
-        {
-            try
-            {
-                T result = await action();
-                await onCommit(transaction);
-                result2 = result;
-            }
-            catch (Exception arg)
-            {
-                await onRollback(transaction, arg);
-                throw;
-            }
-        }
+    //    T result2;
+    //    await using (IDbContextTransaction transaction = await Database.BeginTransactionAsync())
+    //    {
+    //        try
+    //        {
+    //            T result = await action();
+    //            await onCommit(transaction);
+    //            result2 = result;
+    //        }
+    //        catch (Exception arg)
+    //        {
+    //            await onRollback(transaction, arg);
+    //            throw;
+    //        }
+    //    }
 
-        return result2;
-    }
+    //    return result2;
+    //}
 
     //public async Task<T?> GetNextSequenceValue<T>(string name, string? schemaName = null)
     //{
@@ -117,21 +116,21 @@ public abstract class DefaultConfiguredDbContext : Microsoft.EntityFrameworkCore
     //    return result.FirstOrDefault();
     //}
 
-    public async Task<T> GetNextSequenceValueRequired<T>(string name, string? schemaName = null)
-    {
-        T val = await GetNextSequenceValue<T>(name, schemaName);
-        if (val == null)
-        {
-            throw new Exception("Sequence value is null");
-        }
+    //public async Task<T> GetNextSequenceValueRequired<T>(string name, string? schemaName = null)
+    //{
+    //    T val = await GetNextSequenceValue<T>(name, schemaName);
+    //    if (val == null)
+    //    {
+    //        throw new Exception("Sequence value is null");
+    //    }
 
-        return val;
-    }
+    //    return val;
+    //}
 
-    public async Task<long> GetNextSequenceValue(string name, string? schemaName = null)
-    {
-        return await GetNextSequenceValueRequired<long>(name, schemaName);
-    }
+    //public async Task<long> GetNextSequenceValue(string name, string? schemaName = null)
+    //{
+    //    return await GetNextSequenceValueRequired<long>(name, schemaName);
+    //}
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

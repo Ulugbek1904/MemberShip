@@ -1,5 +1,4 @@
-﻿using Common.Models.Base;
-using System.ComponentModel.DataAnnotations.Schema;
+﻿using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Domain.Models.Auth;
 

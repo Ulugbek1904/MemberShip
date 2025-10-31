@@ -1,24 +1,24 @@
+using WebCore.Extensions;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+if (builder.Environment.IsDevelopment())
+{
+    builder.WebHost.ConfigureKestrel(x => x.ListenAnyIP(8081));
+}
+//builder.Services.AddStyxClient("http://172.21.180.14");
+builder.ConfigureDefaults("AuthApi");
+builder.ConfiguredDbContext();
+//builder.Services.ConfigureServicesFromTypeAssembly<IAuthService>();
+//builder.Services.ConfigureServicesFromTypeAssembly<IMailBroker>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-
-app.UseAuthorization();
+#if !DEBUG
+     app.ConfigureDefaults("/api-auth");
+#else
+//app.ConfigureDefaults("/");
+#endif
 
 app.MapControllers();
 

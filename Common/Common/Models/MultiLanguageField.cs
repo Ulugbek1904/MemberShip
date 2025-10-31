@@ -82,8 +82,8 @@ public class MultiLanguageField
         return false;
     }
 
-    public override string ToString()
-    {
-        return SerializerHelper.ToJsonString(this);
-    }
+    //public override string ToString()
+    //{
+    //    return SerializerHelper.ToJsonString(this);
+    //}
 }

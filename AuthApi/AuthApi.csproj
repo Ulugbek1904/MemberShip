@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AuthService\AuthService.csproj" />
+    <ProjectReference Include="..\WebCore\WebCore.csproj" />
   </ItemGroup>
 
 </Project>

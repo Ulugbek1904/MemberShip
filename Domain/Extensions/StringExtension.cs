@@ -1,5 +1,4 @@
 ﻿using Microsoft.IdentityModel.SecurityTokenService;
-using System.Runtime.Intrinsics.Arm;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -28,7 +27,7 @@ public static partial class StringExtension
 
     public static string Hash(this string input)
     {
-        if(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") != "Production")
+        if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") != "Production")
             return input;
 
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));

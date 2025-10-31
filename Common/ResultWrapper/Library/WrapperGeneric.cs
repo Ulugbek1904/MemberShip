@@ -1,5 +1,4 @@
-﻿using Common.ResultWrapper.Library.Common;
-using Common.ResultWrapper.Library.Interfaces;
+﻿using Common.ResultWrapper.Library.Interfaces;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using System.Net;
 using System.Text.Json.Serialization;

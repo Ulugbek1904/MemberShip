@@ -1,5 +1,4 @@
 ﻿using Common.Models.Base;
-using Domain.Enum.Auth;
 using Domain.Models.Org;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations.Schema;

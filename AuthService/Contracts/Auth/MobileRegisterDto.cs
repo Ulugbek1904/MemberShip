@@ -1,9 +1,8 @@
-﻿using AuthService.Contracts.Auth.Both;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace AuthService.Contracts.Auth;
 
-public record MobileRegisterDto 
+public record MobileRegisterDto
 {
     [EmailAddress]
     public required string Email { get; set; }
@@ -11,6 +10,6 @@ public record MobileRegisterDto
     public required string Password { get; set; }
     [MaxLength(6, ErrorMessage = "Otp code must contain 6 numbers")]
     [MinLength(6, ErrorMessage = "Otp code must contain 6 numbers")]
-    public required string Otp {  get; set; }
+    public required string Otp { get; set; }
     public string? PhoneBrand { get; set; }
 }
